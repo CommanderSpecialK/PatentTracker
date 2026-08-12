@@ -21,29 +21,20 @@ LAND_KONFIG = {
     "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      
 }
 
-# --- 2. DATEN AUS DER ZERSTÜCKELTEN CSV ROBUST LADEN ---
+# --- 2. DATEN AUS DER CSV LADEN ---
 @st.cache_data(ttl=60)
 def load_patent_data():
     zeilen = []
-    # UTF-8 mit BOM ('utf-8-sig') fängt ab, falls Excel die Datei codiert hat
     with open("patente.csv", mode="r", encoding="utf-8-sig") as f:
-        # Der csv.reader erkennt automatisch, wenn Zeilenumbrüche INNERHALB von Anführungszeichen "..." stehen
         reader = csv.reader(f, delimiter=";", quotechar='"')
-        
-        # Header einlesen und säubern
         header = [spalte.strip() for spalte in next(reader)]
         
         for zeile in reader:
             if len(zeile) >= len(header):
-                # Säubere alle Felder von ungewollten Zeilenumbrüchen im Text für die spätere Darstellung
                 gesaeuberte_zeile = [feld.replace("\n", " ").strip() for feld in zeile]
                 zeilen.append(gesaeuberte_zeile)
                 
-    # Erstelle den DataFrame aus den korrekt zusammengesetzten Zeilen
     df = pd.DataFrame(zeilen, columns=header)
-    
-    # Datumsspalte konvertieren
-    df['Veröffentlichungsdatum'] = pd.to_datetime(df['Veröffentlichungsdatum'])
     return df
 
 try:
@@ -53,8 +44,9 @@ except Exception as e:
     st.stop()
 
 # --- 3. SESSION STATE INITIALISIEREN ---
-if "sichtbare_patent_ids" not in st.session_state:
-    st.session_state.sichtbare_patent_ids = []
+# Wir speichern jetzt ein Dictionary aus { Patent_ID: Aufplopp_Zeitstempel }
+if "sichtbare_patente_zeit" not in st.session_state:
+    st.session_state.sichtbare_patente_zeit = {}
 if "naechster_intervall" not in st.session_state:
     st.session_state.naechster_intervall = random.randint(120, 600)
 if "letzter_zeitstempel" not in st.session_state:
@@ -64,26 +56,35 @@ if "letzter_zeitstempel" not in st.session_state:
 aktueller_zeitpunkt = time.time()
 vergangene_zeit = aktueller_zeitpunkt - st.session_state.letzter_zeitstempel
 
-if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_state.sichtbare_patent_ids) == 0:
-    verfuegbare_patente = all_patents_df[~all_patents_df['Veröffentlichungsnummer'].isin(st.session_state.sichtbare_patent_ids)]
+# Wenn das Intervall abgelaufen ist ODER noch überhaupt kein Patent aktiv ist
+if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_state.sichtbare_patente_zeit) == 0:
+    sichtbare_ids = list(st.session_state.sichtbare_patente_zeit.keys())
+    verfuegbare_patente = all_patents_df[~all_patents_df['Veröffentlichungsnummer'].isin(sichtbare_ids)]
     
     if not verfuegbare_patente.empty:
-        # KORREKTUR: .iloc[0] am Ende hinzugefügt, um die Zeile sauber zu extrahieren
-        neues_patent = verfuegbare_patente.sample(n=1).iloc[0]
-        st.session_state.sichtbare_patent_ids.append(neues_patent['Veröffentlichungsnummer'])
+        neues_patent = verfuegbare_patente.sample(n=1).iloc
+        neue_id = neues_patent['Veröffentlichungsnummer']
+        # Merke dir die aktuelle Echtzeit für dieses Patent
+        st.session_state.sichtbare_patente_zeit[neue_id] = datetime.now()
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
 
-
-# --- 5. VERBLASSEN-LOGIK (ÄLTER ALS 2 TAGE) ---
+# --- 5. VERBLASSEN-LOGIK (Prüft das App-Alter, nicht das CSV-Dateialter) ---
 jetzt = datetime.now()
 zwei_tage_her = jetzt - timedelta(days=2)
-sichtbare_patente_df = all_patents_df[all_patents_df['Veröffentlichungsnummer'].isin(st.session_state.sichtbare_patent_ids)]
 
-# --- 6. FOLIUM KARTE ERSTELLEN (WELT-BEGRENZUNG) ---
-m = map = folium.Map(
+# IDs herausfiltern, die älter als 2 Tage in der App aktiv sind
+aktive_ids = [
+    pid for pid, aufplopp_zeit in st.session_state.sichtbare_patente_zeit.items()
+    if aufplopp_zeit >= zwei_tage_her
+]
+
+sichtbare_patente_df = all_patents_df[all_patents_df['Veröffentlichungsnummer'].isin(aktive_ids)]
+
+# --- 6. FOLIUM KARTE ERSTELLEN ---
+m = folium.Map(
     location=[20.0, 0.0], 
     zoom_start=2, 
     tiles="CartoDB positron",
@@ -94,12 +95,10 @@ folium.TileLayer("CartoDB positron", no_wrap=True).add_to(m)
 
 # Marker setzen
 for idx, row in sichtbare_patente_df.iterrows():
-    if row['Veröffentlichungsdatum'] < zwei_tage_her:
-        continue
-    
     pub_nr = str(row['Veröffentlichungsnummer'])
     titel = str(row['Titel'])
     anmelder = str(row['Anmelder'])
+    v_datum = str(row['Veröffentlichungsdatum'])
     
     land_code = pub_nr[:2].upper()
     konfig = LAND_KONFIG.get(land_code, {"farbe": "gray", "lat": 20.0, "lon": 0.0})
@@ -115,7 +114,7 @@ for idx, row in sichtbare_patente_df.iterrows():
         <strong>Patent-ID:</strong> <a href="{google_patents_url}" target="_blank" style="color: #1A73E8; font-weight: bold;">{pub_nr} ↗</a><br>
         <p style="margin: 5px 0;"><strong>Titel:</strong> {titel[:100]}...</p>
         <strong>Anmelder:</strong> {anmelder[:50]}...<br>
-        <strong>Veröffentlicht am:</strong> {row['Veröffentlichungsdatum'].strftime('%d.%m.%Y')}
+        <strong>Veröffentlicht am:</strong> {v_datum}
     </div>
     """
     
