@@ -7,19 +7,26 @@ import random
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Patent Live Tracker", layout="wide")
-st.title("🌐 Internationaler Patent-Live-Tracker (Chronologisch)")
+st.title("🌐 Internationaler Patent-Live-Tracker")
 
 # --- 1. ZENTRALE LÄNDER-KONFIGURATION ---
+# Alle gewünschten Länder inklusive geografischer Mittelpunkte und Farben
 LAND_KONFIG = {
-    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       
-    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        
-    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, 
-    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     
-    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      
-    "FR": {"farbe": "purple", "lat": 46.2276, "lon": 2.2137},       
-    "CO": {"farbe": "cadetblue", "lat": 4.5709, "lon": -74.2973},   
-    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      
+    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       # USA
+    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        # Deutschland
+    "AT": {"farbe": "lightred", "lat": 47.5162, "lon": 14.5501},   # Österreich
+    "FR": {"farbe": "purple", "lat": 46.2276, "lon": 2.2137},       # Frankreich
+    "ES": {"farbe": "orange", "lat": 40.4637, "lon": -3.7492},      # Spanien
+    "PL": {"farbe": "darkgreen", "lat": 51.9194, "lon": 19.1451},   # Polen
+    "RU": {"farbe": "darkred", "lat": 61.5240, "lon": 105.3188},    # Russland
+    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, # Japan
+    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     # China
+    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      # Südkorea
+    "CO": {"farbe": "cadetblue", "lat": 4.5709, "lon": -74.2973},   # Kolumbien
+    "EP": {"farbe": "purple", "lat": 50.1109, "lon": 8.6821},       # Europäisches Patentamt (Mitte Europa / Frankfurt)
+    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      # WIPO / Weltpatent (Genf)
 }
+
 
 # --- 2. DYNAMISCHES LADEN UND SORTIEREN DER EXCEL-DATEI ---
 @st.cache_data(ttl=60)
@@ -97,12 +104,10 @@ folium.TileLayer("CartoDB positron", no_wrap=True).add_to(m)
 
 # Marker setzen
 for idx, row in sichtbare_patente_df.iterrows():
-    pub_nr = str(row['Publication Number'])
+    pub_nr = str(row['Publication Number']).strip()
     titel = str(row['Title']).replace('\n', ' ')
     anmelder = str(row['Applicants']).replace('\n', ' ')
     land_code = str(row['Country']).strip().upper()
-    
-    # Formatiert das Datum für das Popup-Fenster schön lesbar (TT.MM.JJJJ)
     v_datum = row['Publication Date'].strftime('%d.%m.%Y')
     
     konfig = LAND_KONFIG.get(land_code, {"farbe": "gray", "lat": 20.0, "lon": 0.0})
@@ -111,11 +116,13 @@ for idx, row in sichtbare_patente_df.iterrows():
     jitter_lat = konfig["lat"] + random.uniform(-2.0, 2.0)
     jitter_lon = konfig["lon"] + random.uniform(-2.0, 2.0)
     
-    google_patents_url = f"https://google.com{pub_nr}/en"
+    # KORREKTUR: Bereinigt die Patentnummer für die Google-Patents-URL (entfernt Schrägstriche und Leerzeichen)
+    clean_url_id = pub_nr.replace("/", "").replace(" ", "").replace("-", "")
+    google_patents_url = f"https://google.com/{clean_url_id}/en"
     
     popup_html = f"""
     <div style="font-family: sans-serif; font-size: 13px; min-width: 200px;">
-        <strong>Patent-ID:</strong> <a href="{google_patents_url}" target="_blank" style="color: #1A73E8; font-weight: bold;">{pub_nr} ↗</a><br>
+        <strong>Patent-ID:</strong> <a href="{google_patents_url}" target="_blank" style="color: #1A73E8; font-weight: bold; text-decoration: underline;">{pub_nr} ↗</a><br>
         <p style="margin: 5px 0;"><strong>Titel:</strong> {titel[:100]}...</p>
         <strong>Anmelder:</strong> {anmelder[:50]}...<br>
         <strong>Veröffentlicht am:</strong> {v_datum}
@@ -128,6 +135,7 @@ for idx, row in sichtbare_patente_df.iterrows():
         tooltip=f"Patent: {pub_nr}",
         icon=folium.Icon(color=konfig["farbe"], icon="info-sign")
     ).add_to(m)
+
 
 # --- 7. UI DARSTELLUNG ---
 st_folium(m, width="100%", height=650, key="patent_map")
