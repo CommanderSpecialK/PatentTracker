@@ -5,46 +5,43 @@ from streamlit_folium import st_folium
 import time
 import random
 from datetime import datetime, timedelta
-import csv
 
 st.set_page_config(page_title="Patent Live Tracker", layout="wide")
 st.title("🌐 Internationaler Patent-Live-Tracker")
 
 # --- 1. ZENTRALE LÄNDER-KONFIGURATION ---
+# Wir nutzen jetzt die 2-stelligen Codes aus der neuen Spalte "Country"
 LAND_KONFIG = {
-    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       
-    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        
-    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, 
-    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     
-    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      
-    "EP": {"farbe": "purple", "lat": 50.1109, "lon": 8.6821},       
-    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      
+    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       # USA
+    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        # Deutschland
+    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, # Japan
+    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     # China
+    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      # Südkorea
+    "FR": {"farbe": "purple", "lat": 46.2276, "lon": 2.2137},       # Frankreich
+    "CO": {"farbe": "cadetblue", "lat": 4.5709, "lon": -74.2973},   # Kolumbien
+    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      # WIPO (Weltpatent)
 }
 
-# --- 2. DATEN AUS DER CSV LADEN ---
+# --- 2. DATEN AUS DER EXCEL-DATEI LADEN ---
 @st.cache_data(ttl=60)
 def load_patent_data():
-    zeilen = []
-    with open("patente.csv", mode="r", encoding="utf-8-sig") as f:
-        reader = csv.reader(f, delimiter=";", quotechar='"')
-        header = [spalte.strip() for spalte in next(reader)]
-        
-        for zeile in reader:
-            if len(zeile) >= len(header):
-                gesaeuberte_zeile = [feld.replace("\n", " ").strip() for feld in zeile]
-                zeilen.append(gesaeuberte_zeile)
-                
-    df = pd.DataFrame(zeilen, columns=header)
+    # openpyxl liest die Excel-Datei ein. skiprows=4 überspringt die Metadaten oben.
+    df = pd.read_excel("patente.xlsx", skiprows=6, engine="openpyxl")
+    
+    # Spaltennamen von Leerzeichen befreien
+    df.columns = df.columns.str.strip()
+    
+    # Sicherstellen, dass die IDs als sauberer Text gelesen werden
+    df['Publication Number'] = df['Publication Number'].astype(str).str.strip()
     return df
 
 try:
     all_patents_df = load_patent_data()
 except Exception as e:
-    st.error(f"Fehler beim Laden der echten patente.csv: {e}")
+    st.error(f"Fehler beim Laden der echten patente.xlsx: {e}")
     st.stop()
 
 # --- 3. SESSION STATE INITIALISIEREN ---
-# Wir speichern jetzt ein Dictionary aus { Patent_ID: Aufplopp_Zeitstempel }
 if "sichtbare_patente_zeit" not in st.session_state:
     st.session_state.sichtbare_patente_zeit = {}
 if "naechster_intervall" not in st.session_state:
@@ -58,31 +55,27 @@ vergangene_zeit = aktueller_zeitpunkt - st.session_state.letzter_zeitstempel
 
 if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_state.sichtbare_patente_zeit) == 0:
     sichtbare_ids = list(st.session_state.sichtbare_patente_zeit.keys())
-    verfuegbare_patente = all_patents_df[~all_patents_df['Veröffentlichungsnummer'].isin(sichtbare_ids)]
+    verfuegbare_patente = all_patents_df[~all_patents_df['Publication Number'].isin(sichtbare_ids)]
     
     if not verfuegbare_patente.empty:
-        # Hier ziehen wir jetzt direkt den Wert aus der Spalte, ohne Umweg über .iloc
-        neue_id = verfuegbare_patente.sample(n=1)['Veröffentlichungsnummer'].values[0]
-        
-        # Zeitstempel für das Aufploppen in der App speichern
+        # Eine ID sauber per Zufall auswählen
+        neue_id = str(verfuegbare_patente.sample(n=1)['Publication Number'].values[0])
         st.session_state.sichtbare_patente_zeit[neue_id] = datetime.now()
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
 
-
-# --- 5. VERBLASSEN-LOGIK (Prüft das App-Alter, nicht das CSV-Dateialter) ---
+# --- 5. VERBLASSEN-LOGIK (Nach 2 Tagen ausblenden) ---
 jetzt = datetime.now()
 zwei_tage_her = jetzt - timedelta(days=2)
 
-# IDs herausfiltern, die älter als 2 Tage in der App aktiv sind
 aktive_ids = [
     pid for pid, aufplopp_zeit in st.session_state.sichtbare_patente_zeit.items()
     if aufplopp_zeit >= zwei_tage_her
 ]
 
-sichtbare_patente_df = all_patents_df[all_patents_df['Veröffentlichungsnummer'].isin(aktive_ids)]
+sichtbare_patente_df = all_patents_df[all_patents_df['Publication Number'].isin(aktive_ids)]
 
 # --- 6. FOLIUM KARTE ERSTELLEN ---
 m = folium.Map(
@@ -96,12 +89,13 @@ folium.TileLayer("CartoDB positron", no_wrap=True).add_to(m)
 
 # Marker setzen
 for idx, row in sichtbare_patente_df.iterrows():
-    pub_nr = str(row['Veröffentlichungsnummer'])
-    titel = str(row['Titel'])
-    anmelder = str(row['Anmelder'])
-    v_datum = str(row['Veröffentlichungsdatum'])
+    pub_nr = str(row['Publication Number'])
+    titel = str(row['Title']).replace('\n', ' ')
+    anmelder = str(row['Applicants']).replace('\n', ' ')
+    land_code = str(row['Country']).strip().upper()
+    v_datum = str(row['Publication Date'])
     
-    land_code = pub_nr[:2].upper()
+    # Holt die Koordinaten basierend auf der echten "Country"-Spalte
     konfig = LAND_KONFIG.get(land_code, {"farbe": "gray", "lat": 20.0, "lon": 0.0})
     
     random.seed(hash(pub_nr))
