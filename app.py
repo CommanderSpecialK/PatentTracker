@@ -27,10 +27,9 @@ LAND_KONFIG = {
     "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      
 }
 
-# --- 2. EXCEL MIT HYPERLINKS DYNAMISCHES LADEN & SORTIEREN ---
+# --- 2. EXCEL MIT HYPERLINKS DYNAMISCH LADEN & SORTIEREN ---
 @st.cache_data(ttl=60)
 def load_patent_data():
-    # 1. Header-Zeile ermitteln
     raw_df = pd.read_excel("patente.xlsx", header=None, engine="openpyxl")
     header_row_index = 0
     for idx, row in raw_df.iterrows():
@@ -38,29 +37,26 @@ def load_patent_data():
             header_row_index = idx
             break
             
-    # 2. DataFrame normal laden
     df = pd.read_excel("patente.xlsx", skiprows=header_row_index, engine="openpyxl")
     df.columns = df.columns.str.strip()
     
-    # 3. Native Hyperlinks mit openpyxl aus Spalte A ("Application ID") extrahieren
+    # Native Hyperlinks mit openpyxl aus Spalte A ("Application ID") extrahieren
     wb = openpyxl.load_workbook("patente.xlsx", data_only=False)
     ws = wb.active
     
     extracted_urls = []
-    # Datenzeilen beginnen im Excel direkt unter dem Header-Index (berücksichtige 1-basierte Excel-Indizierung)
     start_row = header_row_index + 2 
     
     for i in range(len(df)):
-        cell = ws.cell(row=start_row + i, column=1) # Spalte 1 ist "Application ID"
+        cell = ws.cell(row=start_row + i, column=1)
         if cell.hyperlink and cell.hyperlink.target:
             extracted_urls.append(cell.hyperlink.target)
         else:
-            # Fallback, falls in der Zeile mal kein Link hinterlegt sein sollte
             extracted_urls.append(None)
             
     df['Extracted_URL'] = extracted_urls
     
-    # 4. Chronologisch sortieren (Älteste zuerst)
+    # Chronologisch sortieren (Älteste zuerst)
     df['Publication Date'] = pd.to_datetime(df['Publication Date'])
     df = df.sort_values(by='Publication Date', ascending=True)
     df['Publication Number'] = df['Publication Number'].astype(str).str.strip()
@@ -73,6 +69,7 @@ except Exception as e:
     st.stop()
 
 # --- 3. SESSION STATE INITIALISIEREN ---
+# Dictionary im Format { Patent_ID: App_Aufplopp_Zeitstempel }
 if "sichtbare_patente_zeit" not in st.session_state:
     st.session_state.sichtbare_patente_zeit = {}
 if "naechster_intervall" not in st.session_state:
@@ -89,21 +86,20 @@ if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_sta
     verfuegbare_patente = all_patents_df[~all_patents_df['Publication Number'].isin(sichtbare_ids)]
     
     if not verfuegbare_patente.empty:
-        # KORREKTUR: Wir greifen direkt auf die Spalte zu und holen uns den ersten Wert via .iloc
-        neue_id = str(verfuegbare_patente['Publication Number'].iloc)
-        
-        # Zeitstempel für das Aufploppen in der App abspeichern
+        # Extrahiert das älteste, noch nicht gezeigte Patent aus der vorsortierten Liste
+        neue_id = str(verfuegbare_patente['Publication Number'].iloc[0])
+        # Wir speichern die aktuelle Echtzeit ab, in der das Patent aufploppt!
         st.session_state.sichtbare_patente_zeit[neue_id] = datetime.now()
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
 
-
-# --- 5. VERBLASSEN-LOGIK (Nach 2 Tagen ausblenden) ---
+# --- 5. VERBLASSEN-LOGIK (Filtert basierend auf dem App-Alter) ---
 jetzt = datetime.now()
 zwei_tage_her = jetzt - timedelta(days=2)
 
+# IDs behalten, deren Aufplopp-Zeitstempel jünger als 2 Tage ist
 aktive_ids = [
     pid for pid, aufplopp_zeit in st.session_state.sichtbare_patente_zeit.items()
     if aufplopp_zeit >= zwei_tage_her
@@ -127,22 +123,23 @@ for idx, row in sichtbare_patente_df.iterrows():
     titel = str(row['Title']).replace('\n', ' ')
     anmelder = str(row['Applicants']).replace('\n', ' ')
     land_code = str(row['Country']).strip().upper()
+    
+    # Formatiere das Tabellendatum nur für die reine Textanzeige im Popup
     v_datum = row['Publication Date'].strftime('%d.%m.%Y')
     
-    # --- ABFANGEN NICHT GELISTETER LÄNDER (Fallback) ---
-    # Falls ein Land fehlt, wird 'gray' und die Koordinate [0.0, 0.0] (Nullinsel am Äquator) gewählt
+    # --- FEHLER-ABFANGEN BEI UNBEKANNTEN LÄNDERN ---
+    # Falls das Land fehlt, weicht die App auf Grau und die Nullinsel [0,0] aus statt abzustürzen
     konfig = LAND_KONFIG.get(land_code, {"farbe": "gray", "lat": 0.0, "lon": 0.0})
     
     random.seed(hash(pub_nr))
     jitter_lat = konfig["lat"] + random.uniform(-2.0, 2.0)
     jitter_lon = konfig["lon"] + random.uniform(-2.0, 2.0)
     
-    # --- HYPERLINK NUTZEN ---
-    # Nutzt die aus Excel extrahierte URL. Falls leer, wird als Fallback Google Patents generiert
+    # --- EXCEL HYPERLINK NUTZEN ---
     excel_url = row['Extracted_URL']
     if pd.isna(excel_url) or not excel_url:
         clean_url_id = pub_nr.replace("/", "").replace(" ", "").replace("-", "")
-        patent_url = f"https://google.com/{clean_url_id}/en"
+        patent_url = f"https://google.com{clean_url_id}/en"
     else:
         patent_url = str(excel_url)
     
