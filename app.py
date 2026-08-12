@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import openpyxl
 
 st.set_page_config(page_title="Patent Live Tracker", layout="wide")
-st.title("🌐 Internationaler Patent-Live-Tracker (Chronologisch)")
+st.title("🌐 Internationaler Patent-Live-Tracker")
 
 # --- 1. ZENTRALE LÄNDER-KONFIGURATION ---
 LAND_KONFIG = {
