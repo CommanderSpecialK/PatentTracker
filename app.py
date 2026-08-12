@@ -7,7 +7,7 @@ import random
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Patent Live Tracker", layout="wide")
-st.title("🌐 Internationaler Patent-Live-Tracker")
+st.title("🌐 Internationaler Patent-Live-Tracker (Chronologisch)")
 
 # --- 1. ZENTRALE LÄNDER-KONFIGURATION ---
 LAND_KONFIG = {
@@ -21,26 +21,24 @@ LAND_KONFIG = {
     "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      
 }
 
-# --- 2. DYNAMISCHES LADEN DER EXCEL-DATEI ---
+# --- 2. DYNAMISCHES LADEN UND SORTIEREN DER EXCEL-DATEI ---
 @st.cache_data(ttl=60)
 def load_patent_data():
-    # Zuerst laden wir die Datei komplett roh ein, um die Header-Zeile zu finden
     raw_df = pd.read_excel("patente.xlsx", header=None, engine="openpyxl")
     
-    # Wir suchen nach der Zeile, die "Publication Number" enthält
     header_row_index = 0
     for idx, row in raw_df.iterrows():
         if row.astype(str).str.contains("Publication Number").any():
             header_row_index = idx
             break
             
-    # Jetzt laden wir die Excel-Datei exakt ab dieser dynamisch gefundenen Zeile
     df = pd.read_excel("patente.xlsx", skiprows=header_row_index, engine="openpyxl")
-    
-    # Spaltennamen von Leerzeichen und unsichtbaren Zeichen befreien
     df.columns = df.columns.str.strip()
     
-    # Datentyp erzwingen
+    # Datum konvertieren und die gesamte Tabelle chronologisch sortieren (Älteste zuerst)
+    df['Publication Date'] = pd.to_datetime(df['Publication Date'])
+    df = df.sort_values(by='Publication Date', ascending=True)
+    
     df['Publication Number'] = df['Publication Number'].astype(str).str.strip()
     return df
 
@@ -58,7 +56,7 @@ if "naechster_intervall" not in st.session_state:
 if "letzter_zeitstempel" not in st.session_state:
     st.session_state.letzter_zeitstempel = time.time()
 
-# --- 4. OPTIMIERTE LOGIK FÜR DAS AUFPLOPPEN ---
+# --- 4. CHRONOLOGISCHE LOGIK FÜR DAS AUFPLOPPEN ---
 aktueller_zeitpunkt = time.time()
 vergangene_zeit = aktueller_zeitpunkt - st.session_state.letzter_zeitstempel
 
@@ -67,15 +65,16 @@ if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_sta
     verfuegbare_patente = all_patents_df[~all_patents_df['Publication Number'].isin(sichtbare_ids)]
     
     if not verfuegbare_patente.empty:
-        # KORREKTUR: .iloc[0] statt .values stellt sicher, dass wir einen sauberen Text-String erhalten!
-        neue_id = str(verfuegbare_patente.sample(n=1)['Publication Number'].iloc[0])
+        # ÄNDERUNG: Statt .sample() nehmen wir mit .iloc[0] das erste (älteste) verfügbare Element aus der sortierten Liste
+        naechstes_patent = verfuegbare_patente.iloc[0]
+        neue_id = str(naechstes_patent['Publication Number'])
         st.session_state.sichtbare_patente_zeit[neue_id] = datetime.now()
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
 
-# --- 5. VERBLASSEN-LOGIK ---
+# --- 5. VERBLASSEN-LOGIK (Nach 2 Tagen ausblenden) ---
 jetzt = datetime.now()
 zwei_tage_her = jetzt - timedelta(days=2)
 
@@ -102,7 +101,9 @@ for idx, row in sichtbare_patente_df.iterrows():
     titel = str(row['Title']).replace('\n', ' ')
     anmelder = str(row['Applicants']).replace('\n', ' ')
     land_code = str(row['Country']).strip().upper()
-    v_datum = str(row['Publication Date'])
+    
+    # Formatiert das Datum für das Popup-Fenster schön lesbar (TT.MM.JJJJ)
+    v_datum = row['Publication Date'].strftime('%d.%m.%Y')
     
     konfig = LAND_KONFIG.get(land_code, {"farbe": "gray", "lat": 20.0, "lon": 0.0})
     
