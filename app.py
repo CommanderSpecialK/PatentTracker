@@ -10,28 +10,37 @@ st.set_page_config(page_title="Patent Live Tracker", layout="wide")
 st.title("🌐 Internationaler Patent-Live-Tracker")
 
 # --- 1. ZENTRALE LÄNDER-KONFIGURATION ---
-# Wir nutzen jetzt die 2-stelligen Codes aus der neuen Spalte "Country"
 LAND_KONFIG = {
-    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       # USA
-    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        # Deutschland
-    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, # Japan
-    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     # China
-    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      # Südkorea
-    "FR": {"farbe": "purple", "lat": 46.2276, "lon": 2.2137},       # Frankreich
-    "CO": {"farbe": "cadetblue", "lat": 4.5709, "lon": -74.2973},   # Kolumbien
-    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      # WIPO (Weltpatent)
+    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       
+    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        
+    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, 
+    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     
+    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      
+    "FR": {"farbe": "purple", "lat": 46.2276, "lon": 2.2137},       
+    "CO": {"farbe": "cadetblue", "lat": 4.5709, "lon": -74.2973},   
+    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      
 }
 
-# --- 2. DATEN AUS DER EXCEL-DATEI LADEN ---
+# --- 2. DYNAMISCHES LADEN DER EXCEL-DATEI ---
 @st.cache_data(ttl=60)
 def load_patent_data():
-    # openpyxl liest die Excel-Datei ein. skiprows=4 überspringt die Metadaten oben.
-    df = pd.read_excel("patente.xlsx", skiprows=4, engine="openpyxl")
+    # Zuerst laden wir die Datei komplett roh ein, um die Header-Zeile zu finden
+    raw_df = pd.read_excel("patente.xlsx", header=None, engine="openpyxl")
     
-    # Spaltennamen von Leerzeichen befreien
+    # Wir suchen nach der Zeile, die "Publication Number" enthält
+    header_row_index = 0
+    for idx, row in raw_df.iterrows():
+        if row.astype(str).str.contains("Publication Number").any():
+            header_row_index = idx
+            break
+            
+    # Jetzt laden wir die Excel-Datei exakt ab dieser dynamisch gefundenen Zeile
+    df = pd.read_excel("patente.xlsx", skiprows=header_row_index, engine="openpyxl")
+    
+    # Spaltennamen von Leerzeichen und unsichtbaren Zeichen befreien
     df.columns = df.columns.str.strip()
     
-    # Sicherstellen, dass die IDs als sauberer Text gelesen werden
+    # Datentyp erzwingen
     df['Publication Number'] = df['Publication Number'].astype(str).str.strip()
     return df
 
@@ -49,7 +58,7 @@ if "naechster_intervall" not in st.session_state:
 if "letzter_zeitstempel" not in st.session_state:
     st.session_state.letzter_zeitstempel = time.time()
 
-# --- 4. LOGIK FÜR DAS AUFPLOPPEN ---
+# --- 4. OPTIMIERTE LOGIK FÜR DAS AUFPLOPPEN ---
 aktueller_zeitpunkt = time.time()
 vergangene_zeit = aktueller_zeitpunkt - st.session_state.letzter_zeitstempel
 
@@ -58,15 +67,15 @@ if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_sta
     verfuegbare_patente = all_patents_df[~all_patents_df['Publication Number'].isin(sichtbare_ids)]
     
     if not verfuegbare_patente.empty:
-        # Eine ID sauber per Zufall auswählen
-        neue_id = str(verfuegbare_patente.sample(n=1)['Publication Number'].values[0])
+        # KORREKTUR: .iloc[0] statt .values stellt sicher, dass wir einen sauberen Text-String erhalten!
+        neue_id = str(verfuegbare_patente.sample(n=1)['Publication Number'].iloc[0])
         st.session_state.sichtbare_patente_zeit[neue_id] = datetime.now()
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
 
-# --- 5. VERBLASSEN-LOGIK (Nach 2 Tagen ausblenden) ---
+# --- 5. VERBLASSEN-LOGIK ---
 jetzt = datetime.now()
 zwei_tage_her = jetzt - timedelta(days=2)
 
@@ -95,7 +104,6 @@ for idx, row in sichtbare_patente_df.iterrows():
     land_code = str(row['Country']).strip().upper()
     v_datum = str(row['Publication Date'])
     
-    # Holt die Koordinaten basierend auf der echten "Country"-Spalte
     konfig = LAND_KONFIG.get(land_code, {"farbe": "gray", "lat": 20.0, "lon": 0.0})
     
     random.seed(hash(pub_nr))
