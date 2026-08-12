@@ -4,99 +4,100 @@ import folium
 from streamlit_folium import st_folium
 import time
 import random
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Echtzeit Patent Tracker", layout="wide")
+st.set_page_config(page_title="Patent Live Tracker", layout="wide")
 st.title("🌐 Internationaler Patent-Live-Tracker")
-st.write("Diese App visualisiert echte Patentveröffentlichungen in zufälligen Zeitabständen auf einer Folium-Karte.")
 
-# --- 1. ECHTE DATENBASIS DEFINIEREN (Beispiel-Pool echter internationaler Patente) ---
-# Für die Produktion kannst du diese Liste beliebig mit echten Daten erweitern
-PATENT_POOL = [
-    {"id": "US11942345B2", "titel": "Quantum computing error correction", "land": "USA", "lat": 37.7749, "lon": -122.4194},
-    {"id": "EP3948576A1", "titel": "Solid-state battery electrolyte", "land": "Deutschland", "lat": 50.1109, "lon": 8.6821},
-    {"id": "JP202610234A", "titel": "Neural network optimization for robotics", "land": "Japan", "lat": 35.6762, "lon": 139.6503},
-    {"id": "CN11589324A", "titel": "Photovoltaic cell coating material", "land": "China", "lat": 31.2304, "lon": 121.4737},
-    {"id": "KR202604928A", "titel": "Flexible OLED display structure", "land": "Südkorea", "lat": 37.5665, "lon": 126.9780},
-    {"id": "EP3950111A1", "titel": "Autonomous vehicle radar calibration", "land": "Frankreich", "lat": 48.8566, "lon": 2.3522},
-    {"id": "US11950011B1", "titel": "CRISPR gene editing accuracy enhancer", "land": "USA", "lat": 42.3601, "lon": -71.0589},
-]
-
-# --- 2. LÄNDERSPEZIFISCHE FARBEN ---
-# Folium unterstützt Standard-Farbnamen (red, blue, green, purple, orange, darkred, lightred, etc.)
-FARB_MAP = {
-    "USA": "blue",
-    "Deutschland": "red",
-    "Japan": "darkpurple",
-    "China": "orange",
-    "Südkorea": "green",
-    "Frankreich": "purple"
+# --- 1. ZENTRALE LÄNDER-KONFIGURATION (Farbe und feste Koordinaten) ---
+# Hier kannst du beliebig neue Länder hinzufügen. Die CSV braucht dann keine Koordinaten mehr!
+LAND_KONFIG = {
+    "USA": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},          # Geografischer Mittelpunkt USA
+    "Deutschland": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},    # Geografischer Mittelpunkt DE
+    "Japan": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529},
+    "China": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},
+    "Südkorea": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},
+    "Frankreich": {"farbe": "purple", "lat": 46.2276, "lon": 2.2137}
 }
 
+# --- 2. DATEN AUS CSV LADEN ---
+@st.cache_data(ttl=60)
+def load_patent_data():
+    df = pd.read_csv("patente.csv")
+    df['veroeffentlicht_am'] = pd.to_datetime(df['veroeffentlicht_am'])
+    return df
+
+try:
+    all_patents_df = load_patent_data()
+except Exception as e:
+    st.error(f"Fehler beim Laden der patente.csv: {e}")
+    st.stop()
+
 # --- 3. SESSION STATE INITIALISIEREN ---
-if "sichtbare_patente" not in st.session_state:
-    st.session_state.sichtbare_patente = []
+if "sichtbare_patent_ids" not in st.session_state:
+    st.session_state.sichtbare_patent_ids = []
 if "naechster_intervall" not in st.session_state:
-    st.session_state.naechster_intervall = random.randint(120, 600)  # 2 bis 10 Minuten in Sekunden
+    st.session_state.naechster_intervall = random.randint(120, 600)
 if "letzter_zeitstempel" not in st.session_state:
     st.session_state.letzter_zeitstempel = time.time()
 
-# --- 4. LOGIK FÜR DAS HINZUFÜGEN NEUER PATENTE ---
+# --- 4. LOGIK FÜR DAS AUFPLOPPEN ---
 aktueller_zeitpunkt = time.time()
 vergangene_zeit = aktueller_zeitpunkt - st.session_state.letzter_zeitstempel
 
-# Wenn das zufällige Intervall abgelaufen ist ODER noch gar kein Patent auf der Karte ist
-if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_state.sichtbare_patente) == 0:
-    # Ein zufälliges Patent aus dem Pool auswählen
-    neues_patent = random.choice(PATENT_POOL).copy()
-    # Zeitstempel des "Aufploppens" hinzufügen
-    neues_patent["zeit"] = time.strftime("%H:%M:%S")
+if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_state.sichtbare_patent_ids) == 0:
+    verfuegbare_patente = all_patents_df[~all_patents_df['id'].isin(st.session_state.sichtbare_patent_ids)]
     
-    # Zur Liste hinzufügen
-    st.session_state.sichtbare_patente.append(neues_patent)
+    if not verfuegbare_patente.empty:
+        neues_patent = verfuegbare_patente.sample(n=1).iloc[0]
+        st.session_state.sichtbare_patent_ids.append(neues_patent['id'])
     
-    # Neues zufälliges Intervall für das nächste Mal berechnen (2 bis 10 Minuten)
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = aktueller_zeitpunkt
 
-# --- 5. FOLIUM KARTE ERSTELLEN ---
-# Start-Mittelpunkt der Weltkarte festlegen
+# --- 5. VERBLASSEN-LOGIK ---
+jetzt = datetime.now()
+zwei_tage_gringo = jetzt - timedelta(days=2)
+sichtbare_patente_df = all_patents_df[all_patents_df['id'].isin(st.session_state.sichtbare_patent_ids)]
+
+# --- 6. FOLIUM KARTE ERSTELLEN ---
 m = folium.Map(location=[20, 0], zoom_start=2, tiles="CartoDB positron")
 
-# Alle bisher gesammelten Patente auf die Karte zeichnen
-for pat in st.session_state.sichtbare_patente:
-    farbe = FARB_MAP.get(pat["land"], "gray")  # Fallback auf Grau, falls Land unbekannt
+# Marker setzen
+for idx, row in sichtbare_patente_df.iterrows():
+    if row['veroeffentlicht_am'] < zwei_tage_gringo:
+        continue
     
-    # HTML-Inhalt für das Popup-Fenster stylen
-    popup_text = f"""
-    <strong>Patent-ID:</strong> {pat['id']}<br>
-    <strong>Titel:</strong> {pat['titel']}<br>
-    <strong>Land:</strong> {pat['land']}<br>
-    <strong>Veröffentlicht um:</strong> {pat['zeit']}
+    # Land auslesen und Konfiguration abholen
+    land_name = row['land']
+    konfig = LAND_KONFIG.get(land_name, {"farbe": "gray", "lat": 0.0, "lon": 0.0})
+    
+    # Optionaler "Jitter" (Zufallseffekt): Verhindert, dass Marker exakt übereinanderliegen,
+    # wenn mehrere Patente aus demselben Land gleichzeitig aktiv sind.
+    jitter_lat = konfig["lat"] + random.uniform(-1.5, 1.5)
+    jitter_lon = konfig["lon"] + random.uniform(-1.5, 1.5)
+    
+    google_patents_url = f"https://google.com{row['id']}/en"
+    
+    popup_html = f"""
+    <div style="font-family: sans-serif; font-size: 13px;">
+        <strong>Patent-ID:</strong> <a href="{google_patents_url}" target="_blank" style="color: #1A73E8; font-weight: bold;">{row['id']} ↗</a><br>
+        <strong>Titel:</strong> {row['titel']}<br>
+        <strong>Land:</strong> {land_name}<br>
+        <strong>Veröffentlicht am:</strong> {row['veroeffentlicht_am'].strftime('%d.%m.%Y %H:%M')}
+    </div>
     """
     
-    # Marker hinzufügen
     folium.Marker(
-        location=[pat["lat"], pat["lon"]],
-        popup=folium.Popup(popup_text, max_width=300),
-        tooltip=f"Neu: {pat['id']}",
-        icon=folium.Icon(color=farbe, icon="info-sign")
+        location=[jitter_lat, jitter_lon],
+        popup=folium.Popup(popup_html, max_width=300),
+        tooltip=f"Patent: {row['id']}",
+        icon=folium.Icon(color=konfig["farbe"], icon="info-sign")
     ).add_to(m)
 
-# --- 6. UI IN STREAMLIT DARSTELLEN ---
-col1, col2 = st.columns([3, 1])
+# --- 7. UI DARSTELLUNG ---
+st_folium(m, width="100%", height=650, key="patent_map")
 
-with col1:
-    # Karte rendern
-    st_folium(m, width="100%", height=550, key="patent_map")
-
-with col2:
-    st.subheader("📋 Aktivitäts-Log")
-    st.write(f"Nächstes Patent ploppt auf in: **{int(st.session_state.naechster_intervall - vergangene_zeit)} Sekunden**")
-    
-    # Liste der Patente an der Seite anzeigen (neueste oben)
-    for pat in reversed(st.session_state.sichtbare_patente):
-        st.info(f"**[{pat['zeit']}] {pat['land']}**\n{pat['id']} - {pat['titel']}")
-
-# --- 7. AUTOMATISCHER RE-RUN (ALLE 5 SEKUNDEN FÜR DEN COUNTDOWN) ---
-time.sleep(5)
+# --- 8. HINTERGRUND-TIMER ---
+time.sleep(10)
 st.rerun()
