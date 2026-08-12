@@ -56,20 +56,21 @@ if "letzter_zeitstempel" not in st.session_state:
 aktueller_zeitpunkt = time.time()
 vergangene_zeit = aktueller_zeitpunkt - st.session_state.letzter_zeitstempel
 
-# Wenn das Intervall abgelaufen ist ODER noch überhaupt kein Patent aktiv ist
 if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_state.sichtbare_patente_zeit) == 0:
     sichtbare_ids = list(st.session_state.sichtbare_patente_zeit.keys())
     verfuegbare_patente = all_patents_df[~all_patents_df['Veröffentlichungsnummer'].isin(sichtbare_ids)]
     
     if not verfuegbare_patente.empty:
-        neues_patent = verfuegbare_patente.sample(n=1).iloc
-        neue_id = neues_patent['Veröffentlichungsnummer']
-        # Merke dir die aktuelle Echtzeit für dieses Patent
+        # Hier ziehen wir jetzt direkt den Wert aus der Spalte, ohne Umweg über .iloc
+        neue_id = verfuegbare_patente.sample(n=1)['Veröffentlichungsnummer'].values[0]
+        
+        # Zeitstempel für das Aufploppen in der App speichern
         st.session_state.sichtbare_patente_zeit[neue_id] = datetime.now()
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
+
 
 # --- 5. VERBLASSEN-LOGIK (Prüft das App-Alter, nicht das CSV-Dateialter) ---
 jetzt = datetime.now()
