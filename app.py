@@ -68,12 +68,14 @@ if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_sta
     verfuegbare_patente = all_patents_df[~all_patents_df['Veröffentlichungsnummer'].isin(st.session_state.sichtbare_patent_ids)]
     
     if not verfuegbare_patente.empty:
-        neues_patent = verfuegbare_patente.sample(n=1).iloc
+        # KORREKTUR: .iloc[0] am Ende hinzugefügt, um die Zeile sauber zu extrahieren
+        neues_patent = verfuegbare_patente.sample(n=1).iloc[0]
         st.session_state.sichtbare_patent_ids.append(neues_patent['Veröffentlichungsnummer'])
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
+
 
 # --- 5. VERBLASSEN-LOGIK (ÄLTER ALS 2 TAGE) ---
 jetzt = datetime.now()
