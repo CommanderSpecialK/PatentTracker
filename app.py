@@ -89,13 +89,16 @@ if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_sta
     verfuegbare_patente = all_patents_df[~all_patents_df['Publication Number'].isin(sichtbare_ids)]
     
     if not verfuegbare_patente.empty:
-        naechstes_patent = verfuegbare_patente.iloc
-        neue_id = str(naechstes_patent['Publication Number'])
+        # KORREKTUR: Wir greifen direkt auf die Spalte zu und holen uns den ersten Wert via .iloc
+        neue_id = str(verfuegbare_patente['Publication Number'].iloc)
+        
+        # Zeitstempel für das Aufploppen in der App abspeichern
         st.session_state.sichtbare_patente_zeit[neue_id] = datetime.now()
     
     st.session_state.naechster_intervall = random.randint(120, 600)
     st.session_state.letzter_zeitstempel = time.time()
     vergangene_zeit = 0
+
 
 # --- 5. VERBLASSEN-LOGIK (Nach 2 Tagen ausblenden) ---
 jetzt = datetime.now()
