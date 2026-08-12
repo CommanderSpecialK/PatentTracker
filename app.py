@@ -26,7 +26,7 @@ LAND_KONFIG = {
 @st.cache_data(ttl=60)
 def load_patent_data():
     # openpyxl liest die Excel-Datei ein. skiprows=4 überspringt die Metadaten oben.
-    df = pd.read_excel("patente.xlsx", skiprows=6, engine="openpyxl")
+    df = pd.read_excel("patente.xlsx", skiprows=4, engine="openpyxl")
     
     # Spaltennamen von Leerzeichen befreien
     df.columns = df.columns.str.strip()
