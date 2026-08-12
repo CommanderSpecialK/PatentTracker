@@ -5,34 +5,45 @@ from streamlit_folium import st_folium
 import time
 import random
 from datetime import datetime, timedelta
-import re
+import csv
 
 st.set_page_config(page_title="Patent Live Tracker", layout="wide")
 st.title("🌐 Internationaler Patent-Live-Tracker")
 
 # --- 1. ZENTRALE LÄNDER-KONFIGURATION ---
-# Das Mapping nutzt jetzt die offiziellen 2-stelligen Ländercodes der Patentnummern
 LAND_KONFIG = {
-    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       # USA
-    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        # Deutschland
-    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, # Japan
-    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     # China
-    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      # Südkorea
-    "EP": {"farbe": "purple", "lat": 50.1109, "lon": 8.6821},       # Europäisches Patentamt
-    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      # Weltorganisation (WIPO / Genf)
+    "US": {"farbe": "blue", "lat": 39.8283, "lon": -98.5795},       
+    "DE": {"farbe": "red", "lat": 51.1657, "lon": 10.4515},        
+    "JP": {"farbe": "darkpurple", "lat": 36.2048, "lon": 138.2529}, 
+    "CN": {"farbe": "orange", "lat": 35.8617, "lon": 104.1954},     
+    "KR": {"farbe": "green", "lat": 35.9078, "lon": 127.7669},      
+    "EP": {"farbe": "purple", "lat": 50.1109, "lon": 8.6821},       
+    "WO": {"farbe": "darkblue", "lat": 46.2044, "lon": 6.1432}      
 }
 
-# --- 2. DATEN AUS DER ECHTEN WOCHEN-CSV LADEN ---
+# --- 2. DATEN AUS DER ZERSTÜCKELTEN CSV ROBUST LADEN ---
 @st.cache_data(ttl=60)
 def load_patent_data():
-    # Liest die CSV mit Semikolon-Trennung und entfernt eventuelle Leerzeichen im Header
-    df = pd.read_csv("patente.csv", sep=";", skipinitialspace=True)
+    zeilen = []
+    # UTF-8 mit BOM ('utf-8-sig') fängt ab, falls Excel die Datei codiert hat
+    with open("patente.csv", mode="r", encoding="utf-8-sig") as f:
+        # Der csv.reader erkennt automatisch, wenn Zeilenumbrüche INNERHALB von Anführungszeichen "..." stehen
+        reader = csv.reader(f, delimiter=";", quotechar='"')
+        
+        # Header einlesen und säubern
+        header = [spalte.strip() for spalte in next(reader)]
+        
+        for zeile in reader:
+            if len(zeile) >= len(header):
+                # Säubere alle Felder von ungewollten Zeilenumbrüchen im Text für die spätere Darstellung
+                gesaeuberte_zeile = [feld.replace("\n", " ").strip() for feld in zeile]
+                zeilen.append(gesaeuberte_zeile)
+                
+    # Erstelle den DataFrame aus den korrekt zusammengesetzten Zeilen
+    df = pd.DataFrame(zeilen, columns=header)
     
-    # Spaltennamen bereinigen (Anführungszeichen entfernen, falls vorhanden)
-    df.columns = df.columns.str.replace('"', '').str.strip()
-    
-    # Veröffentlichungsdatum ins richtige Datumsformat konvertieren
-    df['Veröffentlichungsdatum'] = pd.to_datetime(df['Veröffentlichungsdatum'].str.replace('"', '').str.strip())
+    # Datumsspalte konvertieren
+    df['Veröffentlichungsdatum'] = pd.to_datetime(df['Veröffentlichungsdatum'])
     return df
 
 try:
@@ -54,11 +65,10 @@ aktueller_zeitpunkt = time.time()
 vergangene_zeit = aktueller_zeitpunkt - st.session_state.letzter_zeitstempel
 
 if vergangene_zeit >= st.session_state.naechster_intervall or len(st.session_state.sichtbare_patent_ids) == 0:
-    # Nutzen der "Veröffentlichungsnummer" als eindeutige ID
     verfuegbare_patente = all_patents_df[~all_patents_df['Veröffentlichungsnummer'].isin(st.session_state.sichtbare_patent_ids)]
     
     if not verfuegbare_patente.empty:
-        neues_patent = verfuegbare_patente.sample(n=1).iloc[0]
+        neues_patent = verfuegbare_patente.sample(n=1).iloc
         st.session_state.sichtbare_patent_ids.append(neues_patent['Veröffentlichungsnummer'])
     
     st.session_state.naechster_intervall = random.randint(120, 600)
@@ -70,17 +80,14 @@ jetzt = datetime.now()
 zwei_tage_her = jetzt - timedelta(days=2)
 sichtbare_patente_df = all_patents_df[all_patents_df['Veröffentlichungsnummer'].isin(st.session_state.sichtbare_patent_ids)]
 
-# --- 6. FOLIUM KARTE ERSTELLEN (MIT WELT-BEGRENZUNG) ---
-# no_wrap=True verhindert das Wiederholen der Weltkarte beim Zoomen
-m = folium.Map(
+# --- 6. FOLIUM KARTE ERSTELLEN (WELT-BEGRENZUNG) ---
+m = map = folium.Map(
     location=[20.0, 0.0], 
     zoom_start=2, 
     tiles="CartoDB positron",
     min_zoom=2,
     max_bounds=True
 )
-
-# Kachel-Layer mit no_wrap=True überschreiben, um die Endlos-Weltkarte zu stoppen
 folium.TileLayer("CartoDB positron", no_wrap=True).add_to(m)
 
 # Marker setzen
@@ -88,15 +95,13 @@ for idx, row in sichtbare_patente_df.iterrows():
     if row['Veröffentlichungsdatum'] < zwei_tage_her:
         continue
     
-    pub_nr = str(row['Veröffentlichungsnummer']).replace('"', '').strip()
-    titel = str(row['Titel']).replace('"', '').strip()
-    anmelder = str(row['Anmelder']).replace('"', '').strip()
+    pub_nr = str(row['Veröffentlichungsnummer'])
+    titel = str(row['Titel'])
+    anmelder = str(row['Anmelder'])
     
-    # Extrahiere das Land aus den ersten zwei Buchstaben der Veröffentlichungsnummer (z.B. "WO" oder "EP")
     land_code = pub_nr[:2].upper()
     konfig = LAND_KONFIG.get(land_code, {"farbe": "gray", "lat": 20.0, "lon": 0.0})
     
-    # Stabiler Jitter basierend auf der Patentnummer
     random.seed(hash(pub_nr))
     jitter_lat = konfig["lat"] + random.uniform(-2.0, 2.0)
     jitter_lon = konfig["lon"] + random.uniform(-2.0, 2.0)
